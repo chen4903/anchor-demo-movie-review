@@ -1,7 +1,8 @@
-import * as anchor from "@coral-xyz/anchor";
-import { Program } from "@coral-xyz/anchor";
-import { expect } from "chai";
-import { AnchorMovieReviewProgram } from "../target/types/anchor_movie_review_program";
+import * as anchor from "@coral-xyz/anchor"
+import { Program } from "@coral-xyz/anchor"
+import { expect } from "chai"
+import { getAssociatedTokenAddress, getAccount } from "@solana/spl-token"
+import { AnchorMovieReviewProgram } from "../target/types/anchor_movie_review_program"
  
 describe("anchor-movie-review-program", () => {
   // Configure the client to use the local cluster.
@@ -21,18 +22,44 @@ describe("anchor-movie-review-program", () => {
     [Buffer.from(movie.title), provider.wallet.publicKey.toBuffer()],
     program.programId,
   );
+
+  const [movie_pda] = anchor.web3.PublicKey.findProgramAddressSync(
+    [Buffer.from(movie.title), provider.wallet.publicKey.toBuffer()],
+    program.programId
+  )
  
+  const [mint] = anchor.web3.PublicKey.findProgramAddressSync(
+    [Buffer.from("mint")],
+    program.programId
+  )
+ 
+  it("Initializes the reward token", async () => {
+    const tx = await program.methods.initializeTokenMint().rpc();
+  });
+
   it("Movie review is added`", async () => {
-    // Add your test here.
+    const tokenAccount = await getAssociatedTokenAddress(
+      mint,
+      provider.wallet.publicKey,
+    );
+   
     const tx = await program.methods
       .addMovieReview(movie.title, movie.description, movie.rating)
+      .accounts({
+        tokenAccount: tokenAccount,
+      } as any)
       .rpc();
    
-    const account = await program.account.movieAccountState.fetch(moviePda);
-    expect(movie.title === account.title);
-    expect(movie.rating === account.rating);
-    expect(movie.description === account.description);
-    expect(account.reviewer === provider.wallet.publicKey);
+    const account = await program.account.movieAccountState.fetch(movie_pda);
+    expect(account.title).to.equal(movie.title);
+    expect(account.rating).to.equal(movie.rating);
+    expect(account.description).to.equal(movie.description);
+    expect(account.reviewer.toBase58()).to.equal(
+      provider.wallet.publicKey.toBase58(),
+    );
+   
+    const userAta = await getAccount(provider.connection, tokenAccount);
+    expect(Number(userAta.amount)).to.equal((10 * 10) ^ 6);
   });
  
   it("Movie review is updated`", async () => {
@@ -58,11 +85,12 @@ describe("anchor-movie-review-program", () => {
 /*
 
   anchor-movie-review-program
-    ✔ Movie review is added` (209ms)
-    ✔ Movie review is updated` (468ms)
-    ✔ Deletes a movie review (470ms)
+    ✔ Initializes the reward token (234ms)
+    ✔ Movie review is added` (486ms)
+    ✔ Movie review is updated` (462ms)
+    ✔ Deletes a movie review (457ms)
 
 
-  3 passing (1s)
+  4 passing (2s)
 
 */

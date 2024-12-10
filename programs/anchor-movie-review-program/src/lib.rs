@@ -3,6 +3,9 @@ use anchor_lang::prelude::*;
 mod constants;
 use constants::*;
 
+use anchor_spl::associated_token::AssociatedToken;
+use anchor_spl::token::{mint_to, Mint, MintTo, Token, TokenAccount};
+
 // https://solana.com/developers/courses/onchain-development/anchor-pdas#lab
 
 declare_id!("8vMikvL1QYW4oWjb9YLD4Pb1WCC6fYJt55YuEtanm4Hd");
@@ -39,7 +42,7 @@ pub mod anchor_movie_review_program {
             MovieReviewError::DescriptionTooLong
         );
 
-        msg!("Movie Review Account Created");
+        msg!("Movie review account created");
         msg!("Title: {}", title);
         msg!("Description: {}", description);
         msg!("Rating: {}", rating);
@@ -47,8 +50,24 @@ pub mod anchor_movie_review_program {
         let movie_review = &mut ctx.accounts.movie_review;
         movie_review.reviewer = ctx.accounts.initializer.key();
         movie_review.title = title;
-        movie_review.rating = rating;
         movie_review.description = description;
+        movie_review.rating = rating;
+
+        mint_to(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                MintTo {
+                    authority: ctx.accounts.initializer.to_account_info(),
+                    to: ctx.accounts.token_account.to_account_info(),
+                    mint: ctx.accounts.mint.to_account_info(),
+                },
+                &[&["mint".as_bytes(), &[ctx.bumps.mint]]],
+            ),
+            10 * 10 ^ 6,
+        )?;
+
+        msg!("Minted tokens");
+
         Ok(())
     }
 
@@ -64,12 +83,6 @@ pub mod anchor_movie_review_program {
             MovieReviewError::InvalidRating
         );
 
-        // We require that the title is not longer than 20 characters
-        require!(
-            title.len() <= MAX_TITLE_LENGTH,
-            MovieReviewError::TitleTooLong
-        );
-
         // We require that the description is not longer than 50 characters
         require!(
             description.len() <= MAX_DESCRIPTION_LENGTH,
@@ -82,14 +95,18 @@ pub mod anchor_movie_review_program {
         msg!("Rating: {}", rating);
 
         let movie_review = &mut ctx.accounts.movie_review;
-        movie_review.rating = rating;
         movie_review.description = description;
+        movie_review.rating = rating;
 
         Ok(())
     }
-
     pub fn delete_movie_review(_ctx: Context<DeleteMovieReview>, title: String) -> Result<()> {
         msg!("Movie review for {} deleted", title);
+        Ok(())
+    }
+
+    pub fn initialize_token_mint(_ctx: Context<InitializeMint>) -> Result<()> {
+        msg!("Token mint initialized");
         Ok(())
     }
 }
@@ -107,6 +124,24 @@ pub struct MovieAccountState {
     pub title: String, // 4 + len()
     #[max_len(50)]
     pub description: String, // 4 + len()
+}
+
+#[derive(Accounts)]
+pub struct InitializeMint<'info> {
+    #[account(
+        init,
+        seeds = ["mint".as_bytes()],
+        bump,
+        payer = user,
+        mint::decimals = 6,
+        mint::authority = user,
+    )]
+    pub mint: Account<'info, Mint>,
+    #[account(mut)]
+    pub user: Signer<'info>,
+    pub token_program: Program<'info, Token>,
+    pub rent: Sysvar<'info, Rent>,
+    pub system_program: Program<'info, System>,
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -127,7 +162,7 @@ enum MovieReviewError {
 ///                                       Instruction                                            ///
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #[derive(Accounts)]
-#[instruction(title:String)]
+#[instruction(title: String, description: String)]
 pub struct AddMovieReview<'info> {
     #[account(
         init,
@@ -140,6 +175,21 @@ pub struct AddMovieReview<'info> {
     #[account(mut)]
     pub initializer: Signer<'info>,
     pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+    #[account(
+        seeds = ["mint".as_bytes()],
+        bump,
+        mut
+    )]
+    pub mint: Account<'info, Mint>,
+    #[account(
+        init_if_needed,
+        payer = initializer,
+        associated_token::mint = mint,
+        associated_token::authority = initializer
+    )]
+    pub token_account: Account<'info, TokenAccount>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
 }
 
 #[derive(Accounts)]
